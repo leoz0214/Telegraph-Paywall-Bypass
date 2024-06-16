@@ -1,3 +1,4 @@
+import io
 import tkinter as tk
 from ctypes import windll
 from tkinter import messagebox
@@ -5,8 +6,9 @@ from tkinter import ttk
 
 import requests as rq
 from bs4 import BeautifulSoup
+from PIL import Image as PilImage, ImageTk
 
-from article import Article, Text, Image
+from article import Article, load_article_from_soup, Text, Image
 from utils import tnr, RED, DOMAIN, REQUEST_TIMEOUT, ARTICLE_TEXT_PARAMS
 
 
@@ -33,7 +35,9 @@ class TelegraphPaywallBypass(tk.Tk):
     
     def render_article(self, article: Article) -> None:
         """Renders an article on screen."""
-        self.display_frame.render(article)
+        self.display_frame.render(
+            article, self.url_input_frame.settings_frame.display_metadata)
+        self.notebook.select(self.display_frame)
 
 
 class UrlInputFrame(tk.Frame):
@@ -50,11 +54,13 @@ class UrlInputFrame(tk.Frame):
         self.entry = ttk.Entry(
             self, width=100, font=tnr(12), textvariable=self._url)
         self.feedback_label = tk.Label(self, fg=RED, font=tnr(8))
+        self.settings_frame = SettingsFrame(self)
         self.load_button = ttk.Button(
             self, text="Load", width=15, command=self.load, state="disabled")
         self.info_label.pack(padx=25, pady=25)
         self.entry.pack(padx=25)
         self.feedback_label.pack(padx=25)
+        self.settings_frame.pack(padx=25, pady=25)
         self.load_button.pack(padx=25, pady=25)
     
     @property
@@ -91,7 +97,8 @@ class UrlInputFrame(tk.Frame):
             if response.status_code >= 400:
                 raise RuntimeError(f"Status code {response.status_code}")
             soup = BeautifulSoup(response.content, "html.parser")
-            self.master.master.render_article(Article(soup))
+            self.master.master.render_article(
+                load_article_from_soup(soup, self.settings_frame.display_images))
         except Exception as e:
             messagebox.showerror(
                 "Error", f"An error occurred whilst loading the article: {e}")
@@ -107,7 +114,7 @@ class DisplayFrame(tk.Frame):
         self.initial_label.pack(padx=25, pady=25)
         self.canvas = None
     
-    def render(self, article: Article) -> None:
+    def render(self, article: Article, display_metadata: bool) -> None:
         """Renders a given article."""
         self.initial_label.pack_forget()
         if self.canvas is not None:
@@ -117,7 +124,7 @@ class DisplayFrame(tk.Frame):
         self.vertical_scrollbar = tk.Scrollbar(
             self, orient="vertical", command=self.canvas.yview)
         self.canvas.config(yscrollcommand=self.vertical_scrollbar.set)
-        self.article_frame = ArticleFrame(self, article)
+        self.article_frame = ArticleFrame(self, article, display_metadata)
         self.canvas.create_window(
             0, 0, anchor=tk.NW, window=self.article_frame)
         self.canvas.update()
@@ -129,7 +136,9 @@ class DisplayFrame(tk.Frame):
 class ArticleFrame(tk.Frame):
     """Frame of the article, that can be scrolled as needed."""
 
-    def __init__(self, master: tk.Canvas, article: Article) -> None:
+    def __init__(
+        self, master: tk.Canvas, article: Article, display_metdata: bool
+    ) -> None:
         super().__init__(master)
         self.heading = tk.Label(
             self, font=tnr(25, True), text=article.heading,
@@ -139,12 +148,69 @@ class ArticleFrame(tk.Frame):
             **ARTICLE_TEXT_PARAMS)
         self.heading.pack(padx=5, pady=5, anchor=tk.W)
         self.description.pack(padx=5, pady=5, anchor=tk.W)
+        if article.date_time_published is not None and display_metdata:
+            # Metadata enabled.
+            metadata_lines = [
+                f"{article.author_name} | "
+                f"{article.date_time_published.strftime(f'%Y-%m-%dT%H:%M%z')}",
+                f"Topics: {' | '.join(article.keywords)}"]
+            self.metadata = tk.Label(
+                self, font=tnr(11), text="\n".join(metadata_lines),
+                **ARTICLE_TEXT_PARAMS)
+            self.metadata.pack(padx=5, pady=5, anchor=tk.W)
         for element in article.elements:
             if isinstance(element, Text):
                 font = tnr(20, True) if element.is_subheading else tnr(14)
                 tk.Label(
                     self, font=font, text=element.contents,
                     **ARTICLE_TEXT_PARAMS).pack(padx=5, pady=5, anchor=tk.W)
+            else:
+                ImageFrame(self, element).pack(padx=5, pady=5, anchor=tk.W)
+
+
+class ImageFrame(tk.Frame):
+    """Frame holding an image and its caption/credits."""
+
+    def __init__(self, master: ArticleFrame, image: Image) -> None:
+        super().__init__(master)
+        with io.BytesIO(image.data) as image_bytes:
+            pil_image = PilImage.open(image_bytes)
+            self.image = ImageTk.PhotoImage(pil_image)
+        self.image_label = tk.Label(self, image=self.image)
+        info_text = ""
+        if image.caption is not None:
+            info_text += image.caption
+        if image.credits is not None:
+            info_text += f" © {image.credits}"
+        self.info_label = tk.Label(
+            self, font=tnr(11), text=info_text, **ARTICLE_TEXT_PARAMS)
+        self.image_label.pack(padx=5, pady=5, anchor=tk.W)
+        if info_text:
+            self.info_label.pack(padx=5, pady=5, anchor=tk.W)
+
+
+class SettingsFrame(tk.Frame):
+    """Controls whether to display/fetch metadata and images."""
+
+    def __init__(self, master: UrlInputFrame) -> None:
+        super().__init__(master)
+        self._metadata = tk.BooleanVar(value=True)
+        self._images = tk.BooleanVar(value=True)
+        for (text, variable) in (
+            ("Display metadata", self._metadata),
+            ("Display images", self._images)
+        ):
+            checkbutton = tk.Checkbutton(
+                self, text=text, variable=variable, font=tnr(15))
+            checkbutton.pack()
+    
+    @property
+    def display_metadata(self) -> bool:
+        return self._metadata.get()
+
+    @property
+    def display_images(self) -> bool:
+        return self._images.get()
 
 
 def main() -> None:
