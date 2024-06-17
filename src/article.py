@@ -33,6 +33,7 @@ class Article:
     """Represents a Telegraph article."""
     heading: str
     date_time_published: dt.datetime
+    date_time_fetched: dt.datetime
     keywords: list[str]
     author_name: str
     description: str
@@ -52,6 +53,7 @@ def load_article_from_soup(soup: BeautifulSoup, fetch_images: bool) -> Article:
             break
     else:
         raise RuntimeError("Could not determine date published.")
+    date_time_fetched = dt.datetime.now()
     # Form list of keywords from a comma-separated list.
     keywords = sorted(set(json_data["keywords"].split(",")))
     # Ensure author name is normalised in terms of whitespace.
@@ -104,5 +106,5 @@ def load_article_from_soup(soup: BeautifulSoup, fetch_images: bool) -> Article:
     if image is not None:
         elements.append(image)
     return Article(
-        heading, date_time_published, keywords,
+        heading, date_time_published, date_time_fetched, keywords,
         author_name, description, elements)

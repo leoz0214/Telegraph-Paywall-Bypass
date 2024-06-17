@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from PIL import Image as PilImage, ImageTk
 
 from article import Article, load_article_from_soup, Text, Image
+from data import insert_article
 from utils import tnr, RED, DOMAIN, REQUEST_TIMEOUT, ARTICLE_TEXT_PARAMS
 
 
@@ -146,6 +147,7 @@ class ArticleFrame(tk.Frame):
         self.description = tk.Label(
             self, font=tnr(15), text=article.description,
             **ARTICLE_TEXT_PARAMS)
+        self.options_frame = ArticleOptionsFrame(self, article)
         self.heading.pack(padx=5, pady=5, anchor=tk.W)
         self.description.pack(padx=5, pady=5, anchor=tk.W)
         if article.date_time_published is not None and display_metdata:
@@ -158,6 +160,7 @@ class ArticleFrame(tk.Frame):
                 self, font=tnr(11), text="\n".join(metadata_lines),
                 **ARTICLE_TEXT_PARAMS)
             self.metadata.pack(padx=5, pady=5, anchor=tk.W)
+        self.options_frame.pack(padx=5, pady=5, anchor=tk.W)
         for element in article.elements:
             if isinstance(element, Text):
                 font = tnr(20, True) if element.is_subheading else tnr(14)
@@ -166,6 +169,42 @@ class ArticleFrame(tk.Frame):
                     **ARTICLE_TEXT_PARAMS).pack(padx=5, pady=5, anchor=tk.W)
             else:
                 ImageFrame(self, element).pack(padx=5, pady=5, anchor=tk.W)
+
+
+class ArticleOptionsFrame(tk.Frame):
+    """
+    Allows the current article to be exported
+    in document form or saved to the database.
+    """
+
+    def __init__(self, master: ArticleFrame, article: Article) -> None:
+        super().__init__(master)
+        self.article = article
+        self.save_button = ttk.Button(
+            self, text="Save", width=15, command=self.save)
+        self.export_docx_button = ttk.Button(
+            self, text="Export DOCX", width=15, command=self.export_docx)
+        self.export_pdf_button = ttk.Button(
+            self, text="Export PDF", width=15, command=self.export_pdf)
+        self.save_button.grid(row=0, column=0, padx=5, pady=5)
+        self.export_docx_button.grid(row=0, column=1, padx=5, pady=5)
+        self.export_pdf_button.grid(row=0, column=2, padx=5, pady=5)
+    
+    def save(self) -> None:
+        """Saves the article to the database for future viewing."""
+        try:
+            insert_article(self.article)
+        except Exception as e:
+            messagebox.showerror(
+                "Error", f"An error occurred whilst saving the article: {e}")
+            return
+        messagebox.showinfo("Success", "Successfully saved the article.")
+    
+    def export_docx(self) -> None:
+        """Allows the user to export the article in DOCX form."""
+
+    def export_pdf(self) -> None:
+        """Allows the user to export the article in PDF form."""
 
 
 class ImageFrame(tk.Frame):
