@@ -38,6 +38,7 @@ class Article:
     author_name: str
     description: str
     elements: list[Text | Image]
+    id: int = None 
 
 
 def load_article_from_soup(soup: BeautifulSoup, fetch_images: bool) -> Article:

@@ -9,12 +9,21 @@ from bs4 import BeautifulSoup
 from PIL import Image as PilImage, ImageTk
 
 from article import Article, load_article_from_soup, Text, Image
-from data import insert_article
+from data import insert_article, load_articles
 from utils import tnr, RED, DOMAIN, REQUEST_TIMEOUT, ARTICLE_TEXT_PARAMS
 
 
 windll.shcore.SetProcessDpiAwareness(True) # Enhanced GUI quality.
 TITLE = "The Telegraph Paywall Bypass"
+ARTICLE_TABLE_HEADINGS_WIDTHS = {
+    "ID": 75,
+    "Heading": 800,
+    "Author": 300,
+    "Published": 225,
+    "Fetched": 225,
+}
+ARTICLE_TABLE_HEIGHT = 15
+TREEVIEW_ROW_HEIGHT = 25
 
 
 class TelegraphPaywallBypass(tk.Tk):
@@ -23,22 +32,24 @@ class TelegraphPaywallBypass(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         ttk.Style().configure(".", font=tnr(15))
+        ttk.Style().configure("Treeview.Heading", font=tnr(15, True))
+        ttk.Style().configure(
+            "Treeview", font=tnr(11), rowheight=TREEVIEW_ROW_HEIGHT)
         self.title(TITLE)
         self.title_label = tk.Label(
             self, font=tnr(50, True), text="The Telegraph Paywall Bypass")
         self.notebook = ttk.Notebook(self)
         self.url_input_frame = UrlInputFrame(self.notebook)
-        self.display_frame = DisplayFrame(self.notebook)
+        self.articles_frame = ArticlesFrame(self.notebook)
         self.notebook.add(self.url_input_frame, text="URL Input")
-        self.notebook.add(self.display_frame, text="Output")
+        self.notebook.add(self.articles_frame, text="Saved Articles")
         self.title_label.pack()
         self.notebook.pack()
     
     def render_article(self, article: Article) -> None:
         """Renders an article on screen."""
-        self.display_frame.render(
+        ArticleToplevel(
             article, self.url_input_frame.settings_frame.display_metadata)
-        self.notebook.select(self.display_frame)
 
 
 class UrlInputFrame(tk.Frame):
@@ -105,22 +116,12 @@ class UrlInputFrame(tk.Frame):
                 "Error", f"An error occurred whilst loading the article: {e}")
 
 
-class DisplayFrame(tk.Frame):
-    """Frame to display the fetched article contents."""
+class ArticleToplevel(tk.Toplevel):
+    """Toplevel to display the fetched article contents."""
     
-    def __init__(self, master: ttk.Notebook) -> None:
-        super().__init__(master)
-        self.initial_label = tk.Label(
-            self, font=tnr(25), text="No article to view.")
-        self.initial_label.pack(padx=25, pady=25)
-        self.canvas = None
-    
-    def render(self, article: Article, display_metadata: bool) -> None:
-        """Renders a given article."""
-        self.initial_label.pack_forget()
-        if self.canvas is not None:
-            self.canvas.destroy()
-            self.vertical_scrollbar.destroy()
+    def __init__(self, article: Article, display_metadata: bool) -> None:
+        super().__init__()
+        self.title(article.heading)
         self.canvas = tk.Canvas(self, width=1200, height=700)
         self.vertical_scrollbar = tk.Scrollbar(
             self, orient="vertical", command=self.canvas.yview)
@@ -154,7 +155,7 @@ class ArticleFrame(tk.Frame):
             # Metadata enabled.
             metadata_lines = [
                 f"{article.author_name} | "
-                f"{article.date_time_published.strftime(f'%Y-%m-%dT%H:%M%z')}",
+                f"{article.date_time_published.strftime('%Y-%m-%dT%H:%M%z')}",
                 f"Topics: {' | '.join(article.keywords)}"]
             self.metadata = tk.Label(
                 self, font=tnr(11), text="\n".join(metadata_lines),
@@ -250,6 +251,50 @@ class SettingsFrame(tk.Frame):
     @property
     def display_images(self) -> bool:
         return self._images.get()
+
+
+class ArticlesFrame(tk.Frame):
+    """
+    Frame storing a table of saved articles
+    that can be opened (viewed) and deleted.
+    """
+
+    def __init__(self, master: ttk.Notebook) -> None:
+        super().__init__(master)
+        self.articles = load_articles()
+        self.table = ArticlesTable(self)
+        self.table.pack(padx=25, pady=25)
+        self.table.display_articles(self.articles)
+
+
+class ArticlesTable(tk.Frame):
+    """Contains the articles table (treeview) and scrollbar."""
+
+    def __init__(self, master: ArticlesFrame) -> None:
+        super().__init__(master)
+        self.treeview = ttk.Treeview(
+            self, columns=tuple(ARTICLE_TABLE_HEADINGS_WIDTHS),
+            height=ARTICLE_TABLE_HEIGHT, show="headings")
+        for heading, width in ARTICLE_TABLE_HEADINGS_WIDTHS.items():
+            self.treeview.heading(heading, text=heading)
+            self.treeview.column(heading, width=width)
+        self.scrollbar = tk.Scrollbar(
+            self, orient="vertical", command=self.treeview.yview)
+        self.treeview.config(yscrollcommand=self.scrollbar.set)
+        self.treeview.grid(row=0, column=0)
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+    
+    def display_articles(self, articles: list[Article]) -> None:
+        """Displays the given list of articles in the table."""
+        for article in articles:
+            date_time_published = (
+                article.date_time_published.strftime("%Y-%m-%dT%H:%M%z"))
+            date_time_fetched = (
+                article.date_time_fetched.strftime("%Y-%m-%dT%H:%M%z"))
+            table_record = (
+                article.id, article.heading, article.author_name,
+                date_time_published, date_time_fetched)
+            self.treeview.insert("", "end", values=table_record)
 
 
 def main() -> None:
