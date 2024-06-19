@@ -1,5 +1,6 @@
 import io
 import tkinter as tk
+from contextlib import suppress
 from ctypes import windll
 from tkinter import messagebox
 from tkinter import ttk
@@ -9,7 +10,7 @@ from bs4 import BeautifulSoup
 from PIL import Image as PilImage, ImageTk
 
 from article import Article, load_article_from_soup, Text, Image
-from data import insert_article, load_articles
+from data import insert_article, load_articles, delete_article_by_id
 from utils import tnr, RED, DOMAIN, REQUEST_TIMEOUT, ARTICLE_TEXT_PARAMS
 
 
@@ -49,7 +50,8 @@ class TelegraphPaywallBypass(tk.Tk):
     def render_article(self, article: Article) -> None:
         """Renders an article on screen."""
         ArticleToplevel(
-            article, self.url_input_frame.settings_frame.display_metadata)
+            self, article,
+            self.url_input_frame.settings_frame.display_metadata)
 
 
 class UrlInputFrame(tk.Frame):
@@ -119,8 +121,11 @@ class UrlInputFrame(tk.Frame):
 class ArticleToplevel(tk.Toplevel):
     """Toplevel to display the fetched article contents."""
     
-    def __init__(self, article: Article, display_metadata: bool) -> None:
-        super().__init__()
+    def __init__(
+        self, master: TelegraphPaywallBypass,
+        article: Article, display_metadata: bool
+    ) -> None:
+        super().__init__(master)
         self.title(article.heading)
         self.canvas = tk.Canvas(self, width=1200, height=700)
         self.vertical_scrollbar = tk.Scrollbar(
@@ -183,23 +188,48 @@ class ArticleOptionsFrame(tk.Frame):
         self.article = article
         self.save_button = ttk.Button(
             self, text="Save", width=15, command=self.save)
+        self.delete_button = ttk.Button(
+            self, text="Delete", width=15, command=self.delete)
         self.export_docx_button = ttk.Button(
             self, text="Export DOCX", width=15, command=self.export_docx)
         self.export_pdf_button = ttk.Button(
             self, text="Export PDF", width=15, command=self.export_pdf)
-        self.save_button.grid(row=0, column=0, padx=5, pady=5)
+        first_button = (
+            self.save_button if article.id is None else self.delete_button)
+        first_button.grid(row=0, column=0, padx=5, pady=5)
         self.export_docx_button.grid(row=0, column=1, padx=5, pady=5)
         self.export_pdf_button.grid(row=0, column=2, padx=5, pady=5)
     
     def save(self) -> None:
         """Saves the article to the database for future viewing."""
         try:
-            insert_article(self.article)
+            self.article.id = insert_article(self.article)
         except Exception as e:
             messagebox.showerror(
-                "Error", f"An error occurred whilst saving the article: {e}")
+                "Error", f"An error occurred whilst saving the article: {e}",
+                parent=self.master.master)
             return
-        messagebox.showinfo("Success", "Successfully saved the article.")
+        self.master.master.master.articles_frame.update_table()
+        self.save_button.grid_forget()
+        self.delete_button.grid(row=0, column=0, padx=5, pady=5)
+        messagebox.showinfo(
+            "Success", "Successfully saved the article.",
+            parent=self.master.master)
+    
+    def delete(self) -> None:
+        """Erases the article from the database and closes the article."""
+        try:
+            delete_article_by_id(self.article.id)
+        except Exception as e:
+            messagebox.showerror(
+                "Error", f"An error occurred whilst deleting the article: {e}",
+                parent=self.master.master)
+        else:
+            messagebox.showinfo(
+                "Success", "Successfully deleted the article.",
+                parent=self.master.master)
+        self.master.master.master.articles_frame.update_table()
+        self.master.master.destroy()
     
     def export_docx(self) -> None:
         """Allows the user to export the article in DOCX form."""
@@ -261,10 +291,14 @@ class ArticlesFrame(tk.Frame):
 
     def __init__(self, master: ttk.Notebook) -> None:
         super().__init__(master)
-        self.articles = load_articles()
         self.table = ArticlesTable(self)
         self.table.pack(padx=25, pady=25)
-        self.table.display_articles(self.articles)
+        self.table.display_articles(load_articles())
+    
+    def update_table(self) -> None:
+        """Updates the tables upon article insertion/deletion."""
+        self.table.clear()
+        self.table.display_articles(load_articles())
 
 
 class ArticlesTable(tk.Frame):
@@ -272,6 +306,7 @@ class ArticlesTable(tk.Frame):
 
     def __init__(self, master: ArticlesFrame) -> None:
         super().__init__(master)
+        self.articles = None
         self.treeview = ttk.Treeview(
             self, columns=tuple(ARTICLE_TABLE_HEADINGS_WIDTHS),
             height=ARTICLE_TABLE_HEIGHT, show="headings")
@@ -281,12 +316,14 @@ class ArticlesTable(tk.Frame):
         self.scrollbar = tk.Scrollbar(
             self, orient="vertical", command=self.treeview.yview)
         self.treeview.config(yscrollcommand=self.scrollbar.set)
+        self.treeview.bind("<<TreeviewSelect>>", lambda *_: self.view())
         self.treeview.grid(row=0, column=0)
         self.scrollbar.grid(row=0, column=1, sticky="ns")
     
     def display_articles(self, articles: list[Article]) -> None:
         """Displays the given list of articles in the table."""
-        for article in articles:
+        self.articles = articles
+        for article in self.articles:
             date_time_published = (
                 article.date_time_published.strftime("%Y-%m-%dT%H:%M%z"))
             date_time_fetched = (
@@ -295,6 +332,18 @@ class ArticlesTable(tk.Frame):
                 article.id, article.heading, article.author_name,
                 date_time_published, date_time_fetched)
             self.treeview.insert("", "end", values=table_record)
+    
+    def view(self) -> None:
+        """Opens the window for the selected article."""
+        with suppress(IndexError):
+            index = self.treeview.index(self.treeview.selection()[0])
+            ArticleToplevel(
+                self.master.master.master, self.articles[index], True)
+    
+    def clear(self) -> None:
+        """Clears the table."""
+        for row in self.treeview.get_children():
+            self.treeview.delete(row)
 
 
 def main() -> None:

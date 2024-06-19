@@ -76,8 +76,8 @@ def create_tables() -> None:
             )""")
 
 
-def insert_article(article: Article) -> None:
-    """Inserts an article into the database."""
+def insert_article(article: Article) -> int:
+    """Inserts an article into the database, returning the article ID."""
     published_timestamp = int(article.date_time_published.timestamp())
     fetched_timestamp = int(article.date_time_fetched.timestamp())
     with Database() as cursor:
@@ -109,6 +109,7 @@ def insert_article(article: Article) -> None:
             cursor.execute(
                 f"INSERT INTO {ARTICLE_KEYWORD_TABLE} VALUES(?, ?)",
                 (article_id, keyword_id))
+    return article_id
             
 
 def load_article_from_record(record: tuple, cursor: sqlite3.Cursor) -> Article:
@@ -159,6 +160,24 @@ def load_articles() -> list[Article]:
         return [
             load_article_from_record(record, cursor)
                 for record in article_records]
+
+
+def delete_article_by_id(article_id: int) -> None:
+    """Deletes an article by ID, raising an error upon failure."""
+    with Database() as cursor:
+        # Remove main article record, all images, all text, all keywords.
+        cursor.execute(
+            f"DELETE FROM {IMAGE_TABLE} WHERE article_id = ?", (article_id,))
+        cursor.execute(
+            f"DELETE FROM {TEXT_TABLE} WHERE article_id = ?", (article_id,))
+        cursor.execute(
+            f"DELETE FROM {ARTICLE_KEYWORD_TABLE} WHERE article_id = ?",
+            (article_id,))
+        cursor.execute(
+            f"DELETE FROM {ARTICLE_TABLE} WHERE article_id = ?", (article_id,))
+        if cursor.rowcount != 1:
+            # Exactly 1 deletion expected, otherwise erronous.
+            raise RuntimeError("Article already deleted.")
 
 
 # Create tables upon startup if they do not exist.
